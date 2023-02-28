@@ -1,5 +1,4 @@
-use anyhow::anyhow;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::num::Wrapping;
 
 pub fn analyze_tcp_data(data: &[u8]) -> Result<()> {

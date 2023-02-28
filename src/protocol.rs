@@ -1,13 +1,11 @@
-use crate::PrinterStatus;
-use crate::Tape;
-use anyhow::anyhow;
-use anyhow::Context;
-use anyhow::Result;
-use std::boxed::Box;
-use std::mem::size_of;
-use std::mem::MaybeUninit;
-use std::net::UdpSocket;
-use std::slice;
+use crate::{PrinterStatus, Tape};
+use anyhow::{anyhow, Context, Result};
+use std::{
+    boxed::Box,
+    mem::{size_of, MaybeUninit},
+    net::UdpSocket,
+    slice,
+};
 
 /// # Safety
 /// Implementing this trait is safe only when the target type can be converted

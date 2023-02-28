@@ -1,8 +1,8 @@
-use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_graphics::prelude::DrawTarget;
-use embedded_graphics::prelude::OriginDimensions;
-use embedded_graphics::prelude::Size;
-use embedded_graphics::Pixel;
+use embedded_graphics::{
+    pixelcolor::BinaryColor,
+    prelude::{DrawTarget, OriginDimensions, Size},
+    Pixel,
+};
 
 pub struct TapeDisplay {
     pub framebuffer: Vec<Vec<bool>>,

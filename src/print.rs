@@ -1,43 +1,33 @@
-use crate::analyzer::analyze_tcp_data;
-use crate::display::TapeDisplay;
-use crate::protocol::notify_data_stream;
-use crate::protocol::StartPrintRequest;
-use crate::protocol::StatusRequest;
-use crate::protocol::StopPrintRequest;
-use crate::PrinterStatus;
-use crate::Tape;
-use anyhow::anyhow;
-use anyhow::Context;
-use anyhow::Result;
+use crate::{
+    analyzer::analyze_tcp_data,
+    display::TapeDisplay,
+    protocol::{notify_data_stream, StartPrintRequest, StatusRequest, StopPrintRequest},
+    PrinterStatus, Tape,
+};
+use anyhow::{anyhow, Context, Result};
 use argh::FromArgs;
 //use barcoders::sym::code39::Code39;
-use embedded_graphics::geometry::Dimensions;
-use embedded_graphics::geometry::Point;
-use embedded_graphics::mono_font::ascii::FONT_10X20;
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_graphics::prelude::Size;
-use embedded_graphics::primitives::PrimitiveStyle;
-use embedded_graphics::primitives::Rectangle;
-use embedded_graphics::primitives::StyledDrawable;
-use embedded_graphics::text::Alignment;
-use embedded_graphics::text::Baseline;
-use embedded_graphics::text::Text;
-use embedded_graphics::text::TextStyleBuilder;
-use embedded_graphics::Drawable;
+use embedded_graphics::{
+    geometry::{Dimensions, Point},
+    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    pixelcolor::BinaryColor,
+    prelude::Size,
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
+    text::{Alignment, Baseline, Text, TextStyleBuilder},
+    Drawable,
+};
 use image::Luma;
 use qrcode::QrCode;
 //use regex::Regex;
 //use std::fs;
-use std::fs::File;
-use std::io::prelude::Write;
-use std::io::BufWriter;
-use std::net::TcpStream;
-use std::net::UdpSocket;
-use std::num::Wrapping;
-use std::path::Path;
-use std::thread;
-use std::time;
+use std::{
+    fs::File,
+    io::{prelude::Write, BufWriter},
+    net::{TcpStream, UdpSocket},
+    num::Wrapping,
+    path::Path,
+    thread, time,
+};
 
 pub fn mm_to_px(mm: f32) -> i32 {
     const DPI: f32 = 360.0;

@@ -4,9 +4,10 @@
 
 use anyhow::Result;
 use argh::FromArgs;
-use sr5900p::analyzer::analyze_tcp_data;
-use sr5900p::print::do_print;
-use sr5900p::print::PrintArgs;
+use sr5900p::{
+    analyzer::analyze_tcp_data,
+    print::{do_print, PrintArgs},
+};
 use std::fs;
 
 #[derive(FromArgs, PartialEq, Debug)]

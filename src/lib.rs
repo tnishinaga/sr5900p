@@ -6,10 +6,8 @@ pub mod display;
 pub mod print;
 pub mod protocol;
 
-use crate::print::mm_to_px;
-use crate::protocol::PacketHeader;
-use anyhow::anyhow;
-use anyhow::Result;
+use crate::{print::mm_to_px, protocol::PacketHeader};
+use anyhow::{anyhow, Result};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Tape {
