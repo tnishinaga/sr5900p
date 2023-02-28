@@ -68,11 +68,15 @@ fn print_tcp_data(device_ip: &str, data: &[u8]) -> Result<()> {
 
 fn gen_tcp_data(td: &TapeDisplay) -> Result<Vec<u8>> {
     let mut tcp_data: Vec<u8> = Vec::new();
-    tcp_data.append(&mut vec![27, 123, 3, 64, 64, 125]);
-    tcp_data.append(&mut vec![27, 123, 7, 123, 0, 0, 83, 84, 34, 125]);
-    tcp_data.append(&mut vec![27, 123, 7, 67, 2, 2, 1, 1, 73, 125]); // half-cut?
-    tcp_data.append(&mut vec![27, 123, 4, 68, 5, 73, 125]);
-    tcp_data.append(&mut vec![27, 123, 3, 71, 71, 125]);
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x03, 0x40, 0x40, 0x7d]);
+    tcp_data.append(&mut vec![
+        0x1b, 0x7b, 0x07, 0x7b, 0x00, 0x00, 0x53, 0x54, 0x22, 0x7d,
+    ]);
+    tcp_data.append(&mut vec![
+        0x1b, 0x7b, 0x07, 0x43, 0x02, 0x02, 0x01, 0x01, 0x49, 0x7d,
+    ]); // half-cut?
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x04, 0x44, 0x05, 0x49, 0x7d]);
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x03, 0x47, 0x47, 0x7d]);
 
     let mut tape_len_bytes = (td.width as u32 + 4/* safe margin */)
         .to_le_bytes()
@@ -89,13 +93,13 @@ fn gen_tcp_data(td: &TapeDisplay) -> Result<Vec<u8>> {
     tcp_data.append(&mut vec![0x1b, 0x7b, cmd_bytes.len() as u8]);
     tcp_data.append(&mut cmd_bytes);
 
-    tcp_data.append(&mut vec![27, 123, 5, 84, 42, 0, 126, 125]);
-    tcp_data.append(&mut vec![27, 123, 4, 72, 5, 77, 125]);
-    tcp_data.append(&mut vec![27, 123, 4, 115, 0, 115, 125]);
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x05, 0x54, 0x2a, 0x00, 0x7e, 0x7d]);
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x04, 0x48, 0x05, 0x4d, 0x7d]);
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x04, 0x73, 0x00, 0x73, 0x7d]);
 
     let row_bytes = (td.height + 7) / 8;
     for y in 0..td.width {
-        tcp_data.append(&mut vec![0x1b, 0x2e, 0, 0, 0, 1]);
+        tcp_data.append(&mut vec![0x1b, 0x2e, 0x00, 0x00, 0x00, 0x01]);
         tcp_data.append(&mut (td.height as u16).to_le_bytes().to_vec());
         for xb in 0..row_bytes {
             let mut chunk = 0x00;
@@ -110,7 +114,7 @@ fn gen_tcp_data(td: &TapeDisplay) -> Result<Vec<u8>> {
         }
     }
     tcp_data.push(0x0c); // data end
-    tcp_data.append(&mut vec![27, 123, 3, 64, 64, 125]);
+    tcp_data.append(&mut vec![0x1b, 0x7b, 0x3, 0x40, 0x40, 0x7d]);
     Ok(tcp_data)
 }
 
