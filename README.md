@@ -27,3 +27,18 @@ hikalium
 
 ## Special Thanks
 Mine02C4 (for [the initial analysis of the protocol](https://github.com/Mine02C4/TEPRA_PRO_SR5900P_analysis) )
+
+
+# sr2500p
+
+## How to Setup
+
+```
+sudo rfcomm bind rfcomm0 <SR2500P_ADDR> 6
+```
+
+## How to print
+
+```
+sudo ./target/debug/sr5900p print btspp --test-pattern --width 12 --printer /dev/rfcomm0
+```

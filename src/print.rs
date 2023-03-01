@@ -1,8 +1,11 @@
 use crate::{
-    analyzer::analyze_tcp_data,
+    analyzer::{
+        analyze_tcp_data, parse_printer_packets, PrinterCommand, PrinterCutConfig,
+        PrinterPrintData, PrinterProtocol, ToBytes,
+    },
     display::TapeDisplay,
     protocol::{notify_data_stream, StartPrintRequest, StatusRequest, StopPrintRequest},
-    PrinterStatus, Tape,
+    PrinterStatus, Tape, DPI,
 };
 use anyhow::{anyhow, Context, Result};
 use argh::FromArgs;
@@ -23,13 +26,13 @@ use std::{
     net::{TcpStream, UdpSocket},
     num::Wrapping,
     path::Path,
-    thread, time,
+    thread,
+    time::{self, Duration},
 };
 
 pub fn mm_to_px(mm: f32) -> i32 {
-    const DPI: f32 = 360.0;
     const MM_TO_INCH: f32 = 10.0 / 254.0;
-    (mm * DPI * MM_TO_INCH).floor() as i32
+    (mm * DPI.get().unwrap() * MM_TO_INCH).floor() as i32
 }
 
 fn print_tcp_data(device_ip: &str, data: &[u8]) -> Result<()> {
@@ -64,6 +67,71 @@ fn print_tcp_data(device_ip: &str, data: &[u8]) -> Result<()> {
     StopPrintRequest::send(&socket, device_ip)?;
 
     Ok(())
+}
+
+fn print_btspp_data(spp_path: &str, data: &[u8]) -> Result<()> {
+    let mut port = serialport::new(spp_path, 1_000_000)
+        .timeout(Duration::from_secs(10))
+        .open()
+        .expect("Failed to open port");
+    port.write(data).expect("Write failed!");
+    port.flush().expect("Flush failed!");
+    println!("print success");
+
+    // 読まないと印刷がうまくできない
+    let mut response = Vec::new();
+    loop {
+        let mut buf = [0; 1024];
+        let length = match port.read(&mut buf) {
+            Ok(x) => x,
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::TimedOut => break,
+                _ => return Err(e.into()),
+            },
+        };
+        response.extend_from_slice(&buf[0..length]);
+    }
+    println!("response");
+
+    let (_, resp) = parse_printer_packets(&response).unwrap();
+    for r in resp {
+        println!("{:02x?}", r);
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct PrinterConfig {
+    autocut: bool,
+    halfcut: bool,
+    density: u8,
+}
+
+fn gen_btspp_print_data(td: &TapeDisplay, config: &PrinterConfig) -> Result<Vec<u8>> {
+    let cutconfig = PrinterCutConfig {
+        autocut: config.autocut,
+        halfcut: config.halfcut,
+    };
+
+    let data: Vec<PrinterProtocol> = vec![
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x49, 0x00, 0x00])),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x21])),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x49, 0x05, 0x00])),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x40])),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x7b, 0x00, 0x00, 0x53, 0x54])),
+        PrinterProtocol::Command(PrinterCommand::CutConfig(cutconfig)),
+        PrinterProtocol::Command(PrinterCommand::PrintDensity(config.density)),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x47])),
+        PrinterProtocol::Command(PrinterCommand::TapeLength(
+            td.width as u32 + 4, /* safe margin */
+        )),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x54, 0x00, 0x00])),
+        PrinterProtocol::PrintData(PrinterPrintData::from(td)),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x40])),
+        PrinterProtocol::Command(PrinterCommand::Unknown(vec![0x49, 0x00, 0x00])),
+    ];
+
+    Ok(data.iter().map(|x| x.to_bytes()).flatten().collect())
 }
 
 fn gen_tcp_data(td: &TapeDisplay) -> Result<Vec<u8>> {
@@ -119,24 +187,38 @@ fn gen_tcp_data(td: &TapeDisplay) -> Result<Vec<u8>> {
 }
 
 fn determine_tape_width_px(args: &PrintArgs) -> Result<i32> {
-    let detected = if let Some(printer) = &args.printer {
-        let socket = UdpSocket::bind("0.0.0.0:0").context("failed to bind")?;
-        let info = StatusRequest::send(&socket, printer)?;
-        eprintln!("Tape detected: {:?}", info);
-        if let PrinterStatus::SomeTape(t) = info {
-            Some(t)
-        } else {
-            eprintln!("Failed to detect tape width. status: {:?}", info);
-            None
+    let (detected, given) = match &args.nested {
+        PrintSubCommand::Tcp(tcp) => {
+            let detected = if let Some(printer) = &tcp.printer {
+                let socket = UdpSocket::bind("0.0.0.0:0").context("failed to bind")?;
+                let info = StatusRequest::send(&socket, printer)?;
+                eprintln!("Tape detected: {:?}", info);
+                if let PrinterStatus::SomeTape(t) = info {
+                    Some(t)
+                } else {
+                    eprintln!("Failed to detect tape width. status: {:?}", info);
+                    None
+                }
+            } else {
+                None
+            };
+            let given = if let Some(mm) = tcp.width {
+                Some(Tape::from_mm(mm)?)
+            } else {
+                None
+            };
+            (detected, given)
         }
-    } else {
-        None
+        PrintSubCommand::BtSpp(spp) => {
+            let given = if let Some(mm) = spp.width {
+                Some(Tape::from_mm(mm)?)
+            } else {
+                None
+            };
+            (None, given)
+        }
     };
-    let given = if let Some(mm) = args.width {
-        Some(Tape::from_mm(mm)?)
-    } else {
-        None
-    };
+
     Ok(match (given, detected) {
         (None, Some(w)) | (Some(w), None) => w,
         (Some(given), Some(detected)) => {
@@ -151,7 +233,11 @@ fn determine_tape_width_px(args: &PrintArgs) -> Result<i32> {
 }
 
 fn print_qr_text(args: &PrintArgs) -> Result<()> {
-    let text = args.qr_text.as_ref().expect("Please specify --qr-text");
+    let text = match &args.nested {
+        PrintSubCommand::Tcp(tcp) => tcp.qr_text.as_ref().expect("Please specify --qr-text"),
+        PrintSubCommand::BtSpp(spp) => spp.qr_text.as_ref().expect("Please specify --qr-text"),
+    };
+
     let tape_width_px = determine_tape_width_px(args)? as usize;
     let qr_td = {
         let mut td = TapeDisplay::new(tape_width_px, tape_width_px);
@@ -232,16 +318,41 @@ fn print_td(args: &PrintArgs, td: &TapeDisplay) -> Result<()> {
         .collect();
     writer.write_image_data(&data).unwrap();
 
-    let tcp_data = gen_tcp_data(td)?;
+    match &args.nested {
+        PrintSubCommand::Tcp(tcp) => {
+            let tcp_data = gen_tcp_data(td)?;
 
-    if !args.dry_run {
-        print_tcp_data(
-            args.printer.as_ref().context("Please specify --printer")?,
-            &tcp_data,
-        )
-    } else {
-        analyze_tcp_data(&tcp_data)?;
-        Ok(())
+            if !tcp.dry_run {
+                print_tcp_data(
+                    tcp.printer.as_ref().context("Please specify --printer")?,
+                    &tcp_data,
+                )
+            } else {
+                analyze_tcp_data(&tcp_data)?;
+                Ok(())
+            }
+        }
+        PrintSubCommand::BtSpp(spp) => {
+            let config = PrinterConfig {
+                autocut: true,
+                halfcut: false,
+                density: 5,
+            };
+            let btspp_data = gen_btspp_print_data(td, &config)?;
+            if spp.dry_run {
+                let (_, packets) = parse_printer_packets(&btspp_data).unwrap();
+                println!("valid packets");
+                for p in packets {
+                    println!("{:02x?}", p);
+                }
+                Ok(())
+            } else {
+                print_btspp_data(
+                    spp.printer.as_ref().context("Please specify --printer")?,
+                    &btspp_data,
+                )
+            }
+        }
     }
 }
 
@@ -345,16 +456,59 @@ fn print_test_pattern(args: &PrintArgs) -> Result<()> {
     print_td(args, &td)
 }
 
-#[derive(FromArgs, PartialEq, Debug)]
+#[derive(Debug, PartialEq, FromArgs)]
 /// Print something
 #[argh(subcommand, name = "print")]
 pub struct PrintArgs {
+    #[argh(subcommand)]
+    pub nested: PrintSubCommand,
+}
+
+#[derive(Debug, PartialEq, FromArgs)]
+/// Select Tcp or BtSpp
+#[argh(subcommand)]
+pub enum PrintSubCommand {
+    Tcp(TcpPrintArgs),
+    BtSpp(BtSppPrintArgs),
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// Analyze the bluetooth spp packet captures
+#[argh(subcommand, name = "btspp")]
+pub struct BtSppPrintArgs {
+    /// generate a label for a QR code with text
+    #[argh(option)]
+    qr_text: Option<String>,
+    /// DPI
+    #[argh(option)]
+    dpi: f32,
+    /// tape width in mm (default: auto)
+    #[argh(option)]
+    width: Option<usize>,
+    /// do not print (just generate and analyze)
+    #[argh(switch)]
+    dry_run: bool,
+    /// print a test pattern
+    #[argh(switch)]
+    test_pattern: bool,
+    /// path for the printer(e.g. /dev/rfcomm0)
+    #[argh(option)]
+    printer: Option<String>,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// Print something
+#[argh(subcommand, name = "tcp")]
+pub struct TcpPrintArgs {
     /// generate a label for a mac addr
     #[argh(option)]
     mac_addr: Option<String>,
     /// generate a label for a QR code with text
     #[argh(option)]
     qr_text: Option<String>,
+    /// DPI
+    #[argh(option)]
+    dpi: f32,
     /// tape width in mm (default: auto)
     #[argh(option)]
     width: Option<usize>,
@@ -372,9 +526,14 @@ pub struct PrintArgs {
     printer: Option<String>,
 }
 pub fn do_print(args: &PrintArgs) -> Result<()> {
-    if args.test_pattern {
+    let (dpi, test_pattern, qr_text) = match &args.nested {
+        PrintSubCommand::Tcp(tcp) => (tcp.dpi, tcp.test_pattern, tcp.qr_text.is_some()),
+        PrintSubCommand::BtSpp(btspp) => (btspp.dpi, btspp.test_pattern, btspp.qr_text.is_some()),
+    };
+    DPI.set(dpi).unwrap();
+    if test_pattern {
         print_test_pattern(args)
-    } else if args.qr_text.is_some() {
+    } else if qr_text {
         print_qr_text(args)
     } else {
         Err(anyhow!("Please specify a print command"))

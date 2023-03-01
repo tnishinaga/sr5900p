@@ -4,6 +4,7 @@ use embedded_graphics::{
     Pixel,
 };
 
+#[derive(Debug)]
 pub struct TapeDisplay {
     pub framebuffer: Vec<Vec<bool>>,
     pub width: usize,

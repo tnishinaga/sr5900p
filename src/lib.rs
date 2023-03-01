@@ -9,6 +9,10 @@ pub mod protocol;
 use crate::{print::mm_to_px, protocol::PacketHeader};
 use anyhow::{anyhow, Result};
 
+use once_cell::sync::OnceCell;
+
+pub static DPI: OnceCell<f32> = OnceCell::new();
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Tape {
     W4,
